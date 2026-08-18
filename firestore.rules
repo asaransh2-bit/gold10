@@ -4,26 +4,38 @@ service cloud.firestore {
   match /databases/{database}/documents {
 
     /*
-     * Helper functions
+     * ============================================================
+     * HELPER FUNCTIONS
+     * ============================================================
      */
+
     function signedIn() {
       return request.auth != null;
     }
 
     function isOwner(userId) {
-      return signedIn() && request.auth.uid == userId;
+      return signedIn()
+        && request.auth.uid == userId;
     }
 
+
     /*
+     * ============================================================
      * USER PROFILES
+     * ============================================================
      *
-     * Users can read their own profile.
-     * Users may create their own profile during registration.
+     * Users can:
+     *   - read their own profile
+     *   - create their own profile
      *
-     * IMPORTANT:
-     * Balance and gold holdings cannot be changed directly
-     * by the client.
+     * Users CANNOT directly change:
+     *   - GOLD10 balance
+     *   - USD balance
+     *   - total gold
+     *
+     * Those values must be changed by trusted backend code.
      */
+
     match /users/{userId} {
 
       allow read: if isOwner(userId);
@@ -33,28 +45,61 @@ service cloud.firestore {
 
       allow update: if isOwner(userId)
         && request.resource.data.uid == resource.data.uid
-        && request.resource.data.balance == resource.data.balance
-        && request.resource.data.totalGoldGrams == resource.data.totalGoldGrams;
+
+        /*
+         * GOLD10 balance cannot be modified by frontend.
+         */
+        && request.resource.data.goldBalance
+           == resource.data.goldBalance
+
+        /*
+         * USD balance cannot be modified by frontend.
+         */
+        && request.resource.data.usdBalance
+           == resource.data.usdBalance
+
+        /*
+         * Total physical gold cannot be modified by frontend.
+         */
+        && request.resource.data.totalGoldGrams
+           == resource.data.totalGoldGrams;
 
       allow delete: if false;
 
 
       /*
+       * ==========================================================
        * PURCHASE ORDERS
+       * ==========================================================
        *
-       * Browser can create a payment-pending order.
-       * Browser cannot mark it paid or completed.
+       * Frontend creates a real order.
+       *
+       * The order remains:
+       *
+       * PENDING_PAYMENT
+       *
+       * until a trusted payment backend verifies payment.
        */
+
       match /orders/{orderId} {
 
         allow read: if isOwner(userId);
 
         allow create: if isOwner(userId)
-          && request.resource.data.userId == request.auth.uid
-          && request.resource.data.status == "PENDING_PAYMENT"
+
+          && request.resource.data.userId
+             == request.auth.uid
+
+          && request.resource.data.status
+             == "PENDING_PAYMENT"
+
           && request.resource.data.quantity > 0
+
           && request.resource.data.goldGrams > 0;
 
+        /*
+         * Browser cannot mark an order as paid.
+         */
         allow update: if false;
 
         allow delete: if false;
@@ -62,23 +107,35 @@ service cloud.firestore {
 
 
       /*
+       * ==========================================================
        * TRANSACTION LEDGER
+       * ==========================================================
        *
-       * Client can read its own transactions.
+       * Frontend may create a pending purchase record.
        *
-       * Client may create only a PENDING_PAYMENT transaction.
-       * It cannot create completed/minted transactions.
+       * Completed/minted transactions must come from
+       * trusted backend infrastructure.
        */
+
       match /transactions/{transactionId} {
 
         allow read: if isOwner(userId);
 
         allow create: if isOwner(userId)
-          && request.resource.data.type == "PURCHASE"
-          && request.resource.data.status == "PENDING_PAYMENT"
+
+          && request.resource.data.type
+             == "PURCHASE"
+
+          && request.resource.data.status
+             == "PENDING_PAYMENT"
+
           && request.resource.data.amount > 0
+
           && request.resource.data.goldGrams > 0;
 
+        /*
+         * Frontend cannot modify transaction history.
+         */
         allow update: if false;
 
         allow delete: if false;
@@ -86,43 +143,58 @@ service cloud.firestore {
 
 
       /*
+       * ==========================================================
        * VAULT BARS
+       * ==========================================================
        *
-       * These represent physical gold allocations.
+       * Physical gold allocation records.
        *
-       * Users can READ their own allocated bars.
-       * Users cannot create, modify or delete bars.
+       * User:
+       *   READ only
        *
-       * In the real system these must be created by trusted
-       * backend/admin processes after physical allocation.
+       * Backend:
+       *   CREATE / UPDATE / DELETE
        */
+
       match /vaultBars/{barId} {
 
         allow read: if isOwner(userId);
 
         allow create: if false;
+
         allow update: if false;
+
         allow delete: if false;
       }
 
 
       /*
+       * ==========================================================
        * REDEMPTION REQUESTS
+       * ==========================================================
        *
-       * User can create a request.
-       * User can read their own requests.
+       * User creates a physical redemption request.
        *
-       * Completion/cancellation must be backend controlled.
+       * Backend controls fulfillment.
        */
+
       match /redemptions/{redemptionId} {
 
         allow read: if isOwner(userId);
 
         allow create: if isOwner(userId)
-          && request.resource.data.userId == request.auth.uid
-          && request.resource.data.status == "REQUESTED"
+
+          && request.resource.data.userId
+             == request.auth.uid
+
+          && request.resource.data.status
+             == "REQUESTED"
+
           && request.resource.data.goldGrams > 0;
 
+        /*
+         * User cannot mark redemption as completed.
+         */
         allow update: if false;
 
         allow delete: if false;
@@ -131,46 +203,146 @@ service cloud.firestore {
 
 
     /*
-     * MARKET DATA
+     * ============================================================
+     * REAL GOLD10 TRANSFER REQUESTS
+     * ============================================================
      *
-     * Public/read-only market information.
+     * IMPORTANT:
      *
-     * Nobody using the browser can change the gold price.
+     * The frontend creates a PENDING transfer request.
+     *
+     * The frontend DOES NOT directly modify either user's
+     * GOLD10 balance.
+     *
+     * A trusted backend must:
+     *
+     * 1. Verify sender balance
+     * 2. Verify recipient
+     * 3. Lock/validate the transfer
+     * 4. Deduct sender GOLD10
+     * 5. Credit recipient GOLD10
+     * 6. Create transaction records
+     * 7. Mark transfer COMPLETED
+     *
+     * This prevents users from giving themselves unlimited GOLD10.
      */
+
+    match /transfers/{transferId} {
+
+      /*
+       * Sender can create a transfer request.
+       */
+
+      allow create: if signedIn()
+
+        && request.resource.data.fromUserId
+           == request.auth.uid
+
+        && request.resource.data.toUserId
+           != request.auth.uid
+
+        && request.resource.data.status
+           == "PENDING"
+
+        && request.resource.data.asset
+           == "GOLD10"
+
+        && request.resource.data.amount > 0;
+
+
+      /*
+       * Sender and recipient can view the transfer.
+       */
+
+      allow read: if signedIn()
+
+        && (
+          resource.data.fromUserId
+            == request.auth.uid
+
+          ||
+
+          resource.data.toUserId
+            == request.auth.uid
+        );
+
+
+      /*
+       * Browser cannot change transfer status.
+       *
+       * Backend changes:
+       *
+       * PENDING
+       *      ↓
+       * PROCESSING
+       *      ↓
+       * COMPLETED
+       *
+       * or
+       *
+       * FAILED
+       */
+
+      allow update: if false;
+
+      allow delete: if false;
+    }
+
+
+    /*
+     * ============================================================
+     * MARKET DATA
+     * ============================================================
+     *
+     * Gold spot price is READ ONLY from the frontend.
+     *
+     * A trusted backend/price feed should update it.
+     */
+
     match /market/{documentId} {
 
       allow read: if signedIn();
 
       allow create: if false;
+
       allow update: if false;
+
       allow delete: if false;
     }
 
 
     /*
-     * BLOCKCHAIN / PUBLIC LEDGER DATA
+     * ============================================================
+     * BLOCKCHAIN / PUBLIC LEDGER
+     * ============================================================
      *
-     * Read-only from the frontend.
+     * Frontend can READ verified records.
      *
-     * Real mint/transfer records must be written by
-     * trusted backend infrastructure.
+     * Frontend cannot create fake blockchain transactions.
      */
+
     match /blockchain/{documentId} {
 
       allow read: if signedIn();
 
       allow create: if false;
+
       allow update: if false;
+
       allow delete: if false;
     }
 
 
     /*
+     * ============================================================
      * EVERYTHING ELSE
+     * ============================================================
      *
      * Deny by default.
      */
+
     match /{document=**} {
+
       allow read, write: if false;
     }
   }
