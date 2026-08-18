@@ -1,269 +1,175 @@
 rules_version = '2';
 
 service cloud.firestore {
-
   match /databases/{database}/documents {
 
     /*
-     * ============================================================
-     * HELPER FUNCTIONS
-     * ============================================================
+     * Helper functions
      */
-
     function signedIn() {
       return request.auth != null;
     }
 
-    function isOwner(uid) {
-      return signedIn() && request.auth.uid == uid;
+    function isOwner(userId) {
+      return signedIn() && request.auth.uid == userId;
     }
 
     /*
-     * Admin access.
+     * USER PROFILES
+     *
+     * Users can read their own profile.
+     * Users may create their own profile during registration.
      *
      * IMPORTANT:
-     * Do not give a normal user admin:true from the browser.
-     * In the production version this should be assigned using
-     * Firebase Admin SDK / custom claims.
+     * Balance and gold holdings cannot be changed directly
+     * by the client.
      */
-    function isAdmin() {
-      return signedIn()
-        && request.auth.token.admin == true;
-    }
+    match /users/{userId} {
 
+      allow read: if isOwner(userId);
 
-    /*
-     * ============================================================
-     * USER PROFILES
-     * ============================================================
-     *
-     * /users/{uid}
-     *
-     * Users may read their own profile.
-     *
-     * A user may create their own profile.
-     *
-     * A user may update basic profile information, but CANNOT
-     * modify financial/asset fields such as:
-     *
-     *   balance
-     *   totalGoldGrams
-     *
-     * Those fields must eventually be controlled by the backend.
-     */
+      allow create: if isOwner(userId)
+        && request.resource.data.uid == request.auth.uid;
 
-    match /users/{uid} {
-
-      allow read: if isOwner(uid) || isAdmin();
-
-      allow create: if isOwner(uid)
-        && request.resource.data.uid == uid
-        && request.resource.data.balance == 0
-        && request.resource.data.totalGoldGrams == 0;
-
-      allow update: if isOwner(uid)
+      allow update: if isOwner(userId)
         && request.resource.data.uid == resource.data.uid
         && request.resource.data.balance == resource.data.balance
         && request.resource.data.totalGoldGrams == resource.data.totalGoldGrams;
 
-      allow delete: if isAdmin();
+      allow delete: if false;
 
 
       /*
-       * ==========================================================
-       * USER ORDERS
-       * ==========================================================
+       * PURCHASE ORDERS
        *
-       * /users/{uid}/orders/{orderId}
-       *
-       * The browser can CREATE an order.
-       *
-       * It cannot mark the order as PAID or COMPLETE.
-       *
-       * Only an authorized backend/admin can change payment state.
+       * Browser can create a payment-pending order.
+       * Browser cannot mark it paid or completed.
        */
-
       match /orders/{orderId} {
 
-        allow read: if isOwner(uid) || isAdmin();
+        allow read: if isOwner(userId);
 
-        allow create: if isOwner(uid)
-          && request.resource.data.userId == uid
+        allow create: if isOwner(userId)
+          && request.resource.data.userId == request.auth.uid
           && request.resource.data.status == "PENDING_PAYMENT"
           && request.resource.data.quantity > 0
-          && request.resource.data.quantity <= 500
-          && request.resource.data.goldGrams > 0
-          && request.resource.data.spotPricePerGram > 0
-          && request.resource.data.metalValue >= 0
-          && request.resource.data.fee >= 0
-          && request.resource.data.totalValue >= 0;
+          && request.resource.data.goldGrams > 0;
 
-        /*
-         * Normal users cannot update orders.
-         *
-         * Admin/backend may update them.
-         */
-        allow update: if isAdmin();
+        allow update: if false;
 
-        allow delete: if isAdmin();
+        allow delete: if false;
       }
 
 
       /*
-       * ==========================================================
        * TRANSACTION LEDGER
-       * ==========================================================
        *
-       * /users/{uid}/transactions/{transactionId}
+       * Client can read its own transactions.
        *
-       * Users can READ their ledger.
-       *
-       * Users cannot create fake completed transactions.
-       *
-       * Backend/admin creates authoritative transactions.
+       * Client may create only a PENDING_PAYMENT transaction.
+       * It cannot create completed/minted transactions.
        */
-
       match /transactions/{transactionId} {
 
-        allow read: if isOwner(uid) || isAdmin();
+        allow read: if isOwner(userId);
 
-        allow create: if isAdmin();
+        allow create: if isOwner(userId)
+          && request.resource.data.type == "PURCHASE"
+          && request.resource.data.status == "PENDING_PAYMENT"
+          && request.resource.data.amount > 0
+          && request.resource.data.goldGrams > 0;
 
-        allow update: if isAdmin();
+        allow update: if false;
 
-        allow delete: if isAdmin();
+        allow delete: if false;
       }
 
 
       /*
-       * ==========================================================
        * VAULT BARS
-       * ==========================================================
        *
-       * /users/{uid}/vaultBars/{barId}
+       * These represent physical gold allocations.
        *
-       * Users can see bars allocated to their account.
+       * Users can READ their own allocated bars.
+       * Users cannot create, modify or delete bars.
        *
-       * They cannot create/change/delete bars themselves.
+       * In the real system these must be created by trusted
+       * backend/admin processes after physical allocation.
        */
-
       match /vaultBars/{barId} {
 
-        allow read: if isOwner(uid) || isAdmin();
+        allow read: if isOwner(userId);
 
-        allow create: if isAdmin();
-
-        allow update: if isAdmin();
-
-        allow delete: if isAdmin();
+        allow create: if false;
+        allow update: if false;
+        allow delete: if false;
       }
 
 
       /*
-       * ==========================================================
        * REDEMPTION REQUESTS
-       * ==========================================================
        *
-       * /users/{uid}/redemptions/{redemptionId}
+       * User can create a request.
+       * User can read their own requests.
+       *
+       * Completion/cancellation must be backend controlled.
        */
-
       match /redemptions/{redemptionId} {
 
-        allow read: if isOwner(uid) || isAdmin();
+        allow read: if isOwner(userId);
 
-        /*
-         * User may CREATE a redemption request.
-         *
-         * The request is always initially PENDING.
-         */
-        allow create: if isOwner(uid)
-          && request.resource.data.userId == uid
-          && request.resource.data.status == "PENDING";
+        allow create: if isOwner(userId)
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.status == "REQUESTED"
+          && request.resource.data.goldGrams > 0;
 
-        /*
-         * Only backend/admin can approve, reject,
-         * ship or complete a redemption.
-         */
-        allow update: if isAdmin();
+        allow update: if false;
 
-        allow delete: if isAdmin();
-      }
-
-
-      /*
-       * ==========================================================
-       * TRANSFERS
-       * ==========================================================
-       *
-       * Transfer records are immutable to normal users.
-       * Actual balance movement should eventually happen
-       * atomically on the trusted backend.
-       */
-
-      match /transfers/{transferId} {
-
-        allow read: if isOwner(uid) || isAdmin();
-
-        allow create: if isOwner(uid)
-          && request.resource.data.fromUserId == uid
-          && request.resource.data.status == "PENDING";
-
-        allow update: if isAdmin();
-
-        allow delete: if isAdmin();
+        allow delete: if false;
       }
     }
 
 
     /*
-     * ============================================================
-     * MARKET SPOT PRICE
-     * ============================================================
+     * MARKET DATA
      *
-     * /market/spot
+     * Public/read-only market information.
      *
-     * Everyone authenticated may READ the spot price.
-     *
-     * Normal users CANNOT change the price.
-     *
-     * This prevents someone from changing $110/g to $1/g
-     * through the browser.
+     * Nobody using the browser can change the gold price.
      */
-
     match /market/{documentId} {
 
       allow read: if signedIn();
 
-      allow write: if isAdmin();
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
     }
 
 
     /*
-     * ============================================================
-     * PUBLIC / SYSTEM CONFIGURATION
-     * ============================================================
+     * BLOCKCHAIN / PUBLIC LEDGER DATA
      *
-     * Add public configuration documents here later if needed.
+     * Read-only from the frontend.
      *
-     * Nothing is writable by normal users.
+     * Real mint/transfer records must be written by
+     * trusted backend infrastructure.
      */
-
-    match /public/{documentId} {
+    match /blockchain/{documentId} {
 
       allow read: if signedIn();
 
-      allow write: if isAdmin();
+      allow create: if false;
+      allow update: if false;
+      allow delete: if false;
     }
 
 
     /*
-     * ============================================================
-     * SECURITY DEFAULT
-     * ============================================================
+     * EVERYTHING ELSE
      *
-     * Anything not explicitly allowed above is DENIED.
+     * Deny by default.
      */
-
     match /{document=**} {
       allow read, write: if false;
     }
