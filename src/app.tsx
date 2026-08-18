@@ -1,5 +1,10 @@
 import React, { useEffect, useState } from "react";
-import { onAuthStateChanged, User } from "firebase/auth";
+import {
+  onAuthStateChanged,
+  User,
+  GoogleAuthProvider,
+  signInWithPopup,
+} from "firebase/auth";
 import {
   collection,
   doc,
