@@ -3,13 +3,12 @@ import { onAuthStateChanged, User } from "firebase/auth";
 import {
   collection,
   doc,
-  getDoc,
   getDocs,
   onSnapshot,
   orderBy,
   query,
   setDoc,
-  Timestamp,
+  serverTimestamp,
 } from "firebase/firestore";
 
 import { auth, db } from "./firebase";
@@ -23,32 +22,44 @@ import { ArchitectureView } from "./components/ArchitectureView";
 import { PhysicalRedemptionModal } from "./components/PhysicalRedemptionModal";
 import { TransferModal } from "./components/TransferModal";
 
-import { UserProfile, VaultBar, TransactionRecord, GoldSpotData } from "./types";
+import {
+  UserProfile,
+  VaultBar,
+  TransactionRecord,
+  GoldSpotData,
+} from "./types";
 
 const DEFAULT_SPOT: GoldSpotData = {
-  price: 110,
+  pricePerGram: 110,
   currency: "USD",
-  unit: "gram",
-  timestamp: Date.now(),
+  updatedAt: new Date().toISOString(),
+  source: "GOLD10 reference price",
 };
 
 const DEFAULT_USER: UserProfile = {
-  uid: "",
+  userId: "",
   name: "GOLD10 User",
   email: "",
-  balance: 0,
-  totalGoldGrams: 0,
+  walletAddress: "",
+  goldBalance: 0,
+  usdBalance: 0,
+  status: "pending",
 };
 
 export default function App() {
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
 
+  const [authLoading, setAuthLoading] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(true);
+
   const [currentUser, setCurrentUser] =
     useState<UserProfile>(DEFAULT_USER);
 
-  const [allUsers, setAllUsers] = useState<UserProfile[]>([]);
+  const [allUsers, setAllUsers] =
+    useState<UserProfile[]>([]);
 
-  const [userBars, setUserBars] = useState<VaultBar[]>([]);
+  const [userBars, setUserBars] =
+    useState<VaultBar[]>([]);
 
   const [transactions, setTransactions] =
     useState<TransactionRecord[]>([]);
@@ -72,96 +83,244 @@ export default function App() {
     useState(false);
 
   /*
-   * Firebase authentication
+   * ---------------------------------------------------------
+   * FIREBASE AUTHENTICATION
+   * ---------------------------------------------------------
    */
+
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setFirebaseUser(user);
-    });
+    const unsubscribe = onAuthStateChanged(
+      auth,
+      (user) => {
+        setFirebaseUser(user);
+        setAuthLoading(false);
+
+        if (!user) {
+          setCurrentUser(DEFAULT_USER);
+          setProfileLoading(false);
+        }
+      },
+      (error) => {
+        console.error("Authentication error:", error);
+        setFirebaseUser(null);
+        setAuthLoading(false);
+        setProfileLoading(false);
+      }
+    );
 
     return () => unsubscribe();
   }, []);
 
   /*
-   * Create/load the user's Firestore profile
+   * ---------------------------------------------------------
+   * USER PROFILE
+   *
+   * Creates the Firestore profile the first time a user signs in.
+   * ---------------------------------------------------------
    */
+
   useEffect(() => {
     if (!firebaseUser) return;
 
-    const loadProfile = async () => {
-      const ref = doc(db, "users", firebaseUser.uid);
-      const snapshot = await getDoc(ref);
+    const userRef = doc(db, "users", firebaseUser.uid);
 
-      if (!snapshot.exists()) {
-        const profile: UserProfile = {
-          uid: firebaseUser.uid,
-          name:
-            firebaseUser.displayName ||
-            firebaseUser.email?.split("@")[0] ||
-            "GOLD10 User",
-          email: firebaseUser.email || "",
-          balance: 0,
-          totalGoldGrams: 0,
-        };
+    const unsubscribe = onSnapshot(
+      userRef,
+      async (snapshot) => {
+        try {
+          if (!snapshot.exists()) {
+            const profile: UserProfile = {
+              userId: firebaseUser.uid,
 
-        await setDoc(ref, profile);
-        setCurrentUser(profile);
-      } else {
-        setCurrentUser(snapshot.data() as UserProfile);
+              name:
+                firebaseUser.displayName ||
+                firebaseUser.email?.split("@")[0] ||
+                "GOLD10 User",
+
+              email: firebaseUser.email || "",
+
+              walletAddress: "",
+
+              goldBalance: 0,
+
+              usdBalance: 0,
+
+              status: "active",
+
+              createdAt: new Date().toISOString(),
+
+              updatedAt: new Date().toISOString(),
+            };
+
+            await setDoc(userRef, {
+              ...profile,
+              createdAt: serverTimestamp(),
+              updatedAt: serverTimestamp(),
+            });
+
+            setCurrentUser(profile);
+          } else {
+            const data = snapshot.data();
+
+            const profile: UserProfile = {
+              userId:
+                data.userId ||
+                firebaseUser.uid,
+
+              name:
+                data.name ||
+                firebaseUser.displayName ||
+                "GOLD10 User",
+
+              email:
+                data.email ||
+                firebaseUser.email ||
+                "",
+
+              walletAddress:
+                data.walletAddress ||
+                "",
+
+              goldBalance:
+                typeof data.goldBalance === "number"
+                  ? data.goldBalance
+                  : 0,
+
+              usdBalance:
+                typeof data.usdBalance === "number"
+                  ? data.usdBalance
+                  : 0,
+
+              status:
+                data.status || "active",
+
+              createdAt:
+                data.createdAt?.toDate?.()?.toISOString?.() ||
+                data.createdAt,
+
+              updatedAt:
+                data.updatedAt?.toDate?.()?.toISOString?.() ||
+                data.updatedAt,
+            };
+
+            setCurrentUser(profile);
+          }
+
+          setProfileLoading(false);
+        } catch (error) {
+          console.error(
+            "Unable to load user profile:",
+            error
+          );
+
+          setProfileLoading(false);
+        }
+      },
+      (error) => {
+        console.error(
+          "User profile listener:",
+          error
+        );
+
+        setProfileLoading(false);
       }
-    };
-
-    loadProfile().catch(console.error);
-  }, [firebaseUser]);
-
-  /*
-   * Real-time user profile updates
-   */
-  useEffect(() => {
-    if (!firebaseUser) return;
-
-    const ref = doc(db, "users", firebaseUser.uid);
-
-    const unsubscribe = onSnapshot(ref, (snapshot) => {
-      if (snapshot.exists()) {
-        setCurrentUser(snapshot.data() as UserProfile);
-      }
-    });
+    );
 
     return () => unsubscribe();
   }, [firebaseUser]);
 
   /*
-   * Real-time vault bars
+   * ---------------------------------------------------------
+   * USER VAULT BARS
+   * ---------------------------------------------------------
    */
-  useEffect(() => {
-    if (!firebaseUser) return;
 
-    const ref = collection(
+  useEffect(() => {
+    if (!firebaseUser) {
+      setUserBars([]);
+      return;
+    }
+
+    const barsRef = collection(
       db,
       "users",
       firebaseUser.uid,
       "vaultBars"
     );
 
-    const unsubscribe = onSnapshot(ref, (snapshot) => {
-      const bars = snapshot.docs.map(
-        (item) => item.data() as VaultBar
-      );
+    const unsubscribe = onSnapshot(
+      barsRef,
+      (snapshot) => {
+        const bars: VaultBar[] = snapshot.docs.map(
+          (item) => {
+            const data = item.data();
 
-      setUserBars(bars);
-    });
+            return {
+              id: data.id || item.id,
+
+              serialNumber:
+                data.serialNumber || "",
+
+              vaultLocation:
+                data.vaultLocation || "",
+
+              vaultProvider:
+                data.vaultProvider || "",
+
+              auditCertificateId:
+                data.auditCertificateId || "",
+
+              weightGrams:
+                Number(data.weightGrams || 0),
+
+              purity:
+                data.purity || "999.9",
+
+              status:
+                data.status || "available",
+
+              allocatedGold10:
+                Number(data.allocatedGold10 || 0),
+
+              createdAt:
+                data.createdAt?.toDate?.()?.toISOString?.() ||
+                data.createdAt,
+
+              updatedAt:
+                data.updatedAt?.toDate?.()?.toISOString?.() ||
+                data.updatedAt,
+            };
+          }
+        );
+
+        setUserBars(bars);
+      },
+      (error) => {
+        console.error(
+          "Vault bar listener:",
+          error
+        );
+
+        setUserBars([]);
+      }
+    );
 
     return () => unsubscribe();
   }, [firebaseUser]);
 
   /*
-   * Real-time transaction ledger
+   * ---------------------------------------------------------
+   * USER TRANSACTION LEDGER
+   * ---------------------------------------------------------
    */
-  useEffect(() => {
-    if (!firebaseUser) return;
 
-    const ref = collection(
+  useEffect(() => {
+    if (!firebaseUser) {
+      setTransactions([]);
+      return;
+    }
+
+    const transactionsRef = collection(
       db,
       "users",
       firebaseUser.uid,
@@ -169,21 +328,88 @@ export default function App() {
     );
 
     const transactionQuery = query(
-      ref,
+      transactionsRef,
       orderBy("timestamp", "desc")
     );
 
     const unsubscribe = onSnapshot(
       transactionQuery,
       (snapshot) => {
-        const records = snapshot.docs.map(
-          (item) => item.data() as TransactionRecord
-        );
+        const records: TransactionRecord[] =
+          snapshot.docs.map((item) => {
+            const data = item.data();
+
+            return {
+              id: data.id || item.id,
+
+              userId:
+                data.userId ||
+                firebaseUser.uid,
+
+              timestamp:
+                data.timestamp?.toDate?.()?.toISOString?.() ||
+                data.timestamp ||
+                new Date().toISOString(),
+
+              type:
+                data.type ||
+                "GOLD10_PURCHASE",
+
+              tokenAmount:
+                Number(data.tokenAmount || 0),
+
+              goldGrams:
+                Number(data.goldGrams || 0),
+
+              status:
+                data.status || "pending",
+
+              fromUserId:
+                data.fromUserId,
+
+              toUserId:
+                data.toUserId,
+
+              fromWallet:
+                data.fromWallet,
+
+              toWallet:
+                data.toWallet,
+
+              totalUsd:
+                typeof data.totalUsd === "number"
+                  ? data.totalUsd
+                  : undefined,
+
+              feeUsd:
+                typeof data.feeUsd === "number"
+                  ? data.feeUsd
+                  : undefined,
+
+              physicalBacking:
+                data.physicalBacking,
+
+              blockchainTx:
+                data.blockchainTx,
+
+              createdAt:
+                data.createdAt?.toDate?.()?.toISOString?.() ||
+                data.createdAt,
+
+              updatedAt:
+                data.updatedAt?.toDate?.()?.toISOString?.() ||
+                data.updatedAt,
+            };
+          });
 
         setTransactions(records);
       },
       (error) => {
-        console.error("Transaction listener:", error);
+        console.error(
+          "Transaction listener:",
+          error
+        );
+
         setTransactions([]);
       }
     );
@@ -192,23 +418,54 @@ export default function App() {
   }, [firebaseUser]);
 
   /*
-   * Real-time spot price.
+   * ---------------------------------------------------------
+   * MARKET SPOT PRICE
    *
-   * The document can later be updated by an authorised
-   * server/backend price feed.
+   * Reads market/spot from Firestore.
+   * ---------------------------------------------------------
    */
+
   useEffect(() => {
-    const ref = doc(db, "market", "spot");
+    const spotRef = doc(
+      db,
+      "market",
+      "spot"
+    );
 
     const unsubscribe = onSnapshot(
-      ref,
+      spotRef,
       (snapshot) => {
-        if (snapshot.exists()) {
-          setSpotData(snapshot.data() as GoldSpotData);
+        if (!snapshot.exists()) {
+          setSpotData(DEFAULT_SPOT);
+          return;
         }
+
+        const data = snapshot.data();
+
+        setSpotData({
+          pricePerGram:
+            Number(data.pricePerGram || 110),
+
+          currency:
+            data.currency || "USD",
+
+          updatedAt:
+            data.updatedAt?.toDate?.()?.toISOString?.() ||
+            data.updatedAt ||
+            new Date().toISOString(),
+
+          source:
+            data.source ||
+            "GOLD10 reference price",
+        });
       },
       (error) => {
-        console.warn("Spot price unavailable:", error);
+        console.warn(
+          "Spot price unavailable:",
+          error
+        );
+
+        setSpotData(DEFAULT_SPOT);
       }
     );
 
@@ -216,22 +473,78 @@ export default function App() {
   }, []);
 
   /*
-   * Load all users for the transfer interface.
+   * ---------------------------------------------------------
+   * USER DIRECTORY
+   *
+   * Used by the transfer interface.
+   * ---------------------------------------------------------
    */
+
   useEffect(() => {
+    if (!firebaseUser) {
+      setAllUsers([]);
+      return;
+    }
+
     const loadUsers = async () => {
       try {
         const snapshot = await getDocs(
           collection(db, "users")
         );
 
-        const users = snapshot.docs.map(
-          (item) => item.data() as UserProfile
-        );
+        const users: UserProfile[] =
+          snapshot.docs
+            .map((item) => {
+              const data = item.data();
+
+              return {
+                userId:
+                  data.userId ||
+                  item.id,
+
+                name:
+                  data.name ||
+                  "GOLD10 User",
+
+                email:
+                  data.email ||
+                  "",
+
+                walletAddress:
+                  data.walletAddress ||
+                  "",
+
+                goldBalance:
+                  Number(data.goldBalance || 0),
+
+                usdBalance:
+                  Number(data.usdBalance || 0),
+
+                status:
+                  data.status || "active",
+
+                createdAt:
+                  data.createdAt?.toDate?.()?.toISOString?.() ||
+                  data.createdAt,
+
+                updatedAt:
+                  data.updatedAt?.toDate?.()?.toISOString?.() ||
+                  data.updatedAt,
+              };
+            })
+            .filter(
+              (user) =>
+                user.status !== "suspended"
+            );
 
         setAllUsers(users);
       } catch (error) {
-        console.error("Unable to load users:", error);
+        console.error(
+          "Unable to load users:",
+          error
+        );
+
+        setAllUsers([]);
       }
     };
 
@@ -239,36 +552,86 @@ export default function App() {
   }, [firebaseUser]);
 
   /*
-   * These callbacks remain compatible with the
-   * existing components.
+   * ---------------------------------------------------------
+   * CALLBACKS
    *
-   * Firebase listeners automatically refresh the UI.
+   * Firestore listeners update the UI automatically.
+   * ---------------------------------------------------------
    */
-  const handlePurchaseSuccess = () => {
-    console.log("Purchase completed.");
+
+  const handlePurchaseSuccess = (
+    purchase: any
+  ) => {
+    console.log(
+      "Purchase recorded:",
+      purchase
+    );
+
+    setActiveTab("dashboard");
   };
 
-  const handleTransferSuccess = () => {
-    console.log("Transfer completed.");
+  const handleTransferSuccess = (
+    transfer?: any
+  ) => {
+    console.log(
+      "Transfer recorded:",
+      transfer
+    );
+
+    setShowTransferModal(false);
   };
 
-  const handleRedeemSuccess = () => {
-    console.log("Redemption request created.");
+  const handleRedeemSuccess = (
+    redemption?: any
+  ) => {
+    console.log(
+      "Redemption request recorded:",
+      redemption
+    );
+
+    setShowRedeemModal(false);
   };
 
   /*
-   * Authentication guard
+   * ---------------------------------------------------------
+   * LOADING STATE
+   * ---------------------------------------------------------
    */
+
+  if (authLoading || profileLoading) {
+    return (
+      <div className="min-h-screen bg-[#050505] text-[#d4af37] flex items-center justify-center">
+        <div className="text-center">
+          <div className="font-serif text-3xl text-white tracking-widest">
+            GOLD10
+          </div>
+
+          <div className="mt-4 text-xs uppercase tracking-[0.25em] text-[#d4af3788]">
+            Connecting securely...
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  /*
+   * ---------------------------------------------------------
+   * LOGIN GUARD
+   * ---------------------------------------------------------
+   */
+
   if (!firebaseUser) {
     return (
       <div className="min-h-screen bg-[#050505] text-[#d4af37] flex items-center justify-center px-6">
+
         <div className="max-w-md w-full border border-[#d4af3744] bg-[#0a0a0a] p-8 text-center">
+
           <h1 className="font-serif text-3xl text-white tracking-widest">
             GOLD10
           </h1>
 
           <p className="mt-4 text-sm text-[#d4af37aa]">
-            Secure 24K gold-backed digital asset platform
+            24K gold asset platform
           </p>
 
           <p className="mt-6 text-xs text-white/50">
@@ -283,13 +646,20 @@ export default function App() {
           >
             Sign In
           </button>
+
         </div>
       </div>
     );
   }
 
+  /*
+   * ---------------------------------------------------------
+   * MAIN APPLICATION
+   * ---------------------------------------------------------
+   */
+
   return (
-    <div className="min-h-screen bg-[#050505] text-[#d4af37] flex flex-col font-sans border border-[#d4af3722]">
+    <div className="min-h-screen bg-[#050505] text-[#d4af37] flex flex-col">
 
       <Header
         currentUser={currentUser}
@@ -304,7 +674,9 @@ export default function App() {
 
         <PriceTicker
           spotData={spotData}
-          onRefresh={() => window.location.reload()}
+          onRefresh={() => {
+            window.location.reload();
+          }}
         />
 
         {activeTab === "dashboard" && (
@@ -313,10 +685,18 @@ export default function App() {
             userBars={userBars}
             transactions={transactions}
             spotData={spotData}
-            onOpenPurchase={() => setActiveTab("purchase")}
-            onOpenTransfer={() => setShowTransferModal(true)}
-            onOpenRedeem={() => setShowRedeemModal(true)}
-            onOpenArchitecture={() => setActiveTab("architecture")}
+            onOpenPurchase={() =>
+              setActiveTab("purchase")
+            }
+            onOpenTransfer={() =>
+              setShowTransferModal(true)
+            }
+            onOpenRedeem={() =>
+              setShowRedeemModal(true)
+            }
+            onOpenArchitecture={() =>
+              setActiveTab("architecture")
+            }
           />
         )}
 
@@ -324,7 +704,9 @@ export default function App() {
           <PurchaseTerminal
             currentUser={currentUser}
             spotData={spotData}
-            onPurchaseComplete={handlePurchaseSuccess}
+            onPurchaseComplete={
+              handlePurchaseSuccess
+            }
             onViewArchitecture={() =>
               setActiveTab("architecture")
             }
@@ -343,12 +725,15 @@ export default function App() {
         {activeTab === "architecture" && (
           <ArchitectureView />
         )}
+
       </main>
 
       <footer className="mt-auto border-t border-[#d4af3722] bg-[#050505] text-[#d4af37aa] py-4 px-6 sm:px-10 text-[10px] uppercase tracking-[0.2em]">
+
         <div className="max-w-7xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
 
           <div className="flex items-center gap-3">
+
             <span className="font-serif font-bold text-white tracking-widest">
               GOLD10
             </span>
@@ -358,25 +743,29 @@ export default function App() {
             </span>
 
             <span className="opacity-70">
-              10g 24K Physical Allocated Standard
+              Firebase-backed account ledger
             </span>
+
           </div>
 
           <div className="flex items-center gap-6 opacity-60 text-[9px] font-mono">
+
             <span>
               Firebase Auth
             </span>
 
             <span>
-              Firestore Ledger
+              Firestore
             </span>
 
             <span>
-              Real-time Database
+              Real-time Ledger
             </span>
+
           </div>
 
         </div>
+
       </footer>
 
       {showTransferModal && (
@@ -386,7 +775,9 @@ export default function App() {
           onClose={() =>
             setShowTransferModal(false)
           }
-          onTransferSuccess={handleTransferSuccess}
+          onTransferSuccess={
+            handleTransferSuccess
+          }
         />
       )}
 
@@ -397,7 +788,9 @@ export default function App() {
           onClose={() =>
             setShowRedeemModal(false)
           }
-          onRedeemSuccess={handleRedeemSuccess}
+          onRedeemSuccess={
+            handleRedeemSuccess
+          }
         />
       )}
 
