@@ -1,0 +1,271 @@
+rules_version = '2';
+
+service cloud.firestore {
+
+  match /databases/{database}/documents {
+
+    /*
+     * ============================================================
+     * HELPER FUNCTIONS
+     * ============================================================
+     */
+
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return signedIn() && request.auth.uid == uid;
+    }
+
+    /*
+     * Admin access.
+     *
+     * IMPORTANT:
+     * Do not give a normal user admin:true from the browser.
+     * In the production version this should be assigned using
+     * Firebase Admin SDK / custom claims.
+     */
+    function isAdmin() {
+      return signedIn()
+        && request.auth.token.admin == true;
+    }
+
+
+    /*
+     * ============================================================
+     * USER PROFILES
+     * ============================================================
+     *
+     * /users/{uid}
+     *
+     * Users may read their own profile.
+     *
+     * A user may create their own profile.
+     *
+     * A user may update basic profile information, but CANNOT
+     * modify financial/asset fields such as:
+     *
+     *   balance
+     *   totalGoldGrams
+     *
+     * Those fields must eventually be controlled by the backend.
+     */
+
+    match /users/{uid} {
+
+      allow read: if isOwner(uid) || isAdmin();
+
+      allow create: if isOwner(uid)
+        && request.resource.data.uid == uid
+        && request.resource.data.balance == 0
+        && request.resource.data.totalGoldGrams == 0;
+
+      allow update: if isOwner(uid)
+        && request.resource.data.uid == resource.data.uid
+        && request.resource.data.balance == resource.data.balance
+        && request.resource.data.totalGoldGrams == resource.data.totalGoldGrams;
+
+      allow delete: if isAdmin();
+
+
+      /*
+       * ==========================================================
+       * USER ORDERS
+       * ==========================================================
+       *
+       * /users/{uid}/orders/{orderId}
+       *
+       * The browser can CREATE an order.
+       *
+       * It cannot mark the order as PAID or COMPLETE.
+       *
+       * Only an authorized backend/admin can change payment state.
+       */
+
+      match /orders/{orderId} {
+
+        allow read: if isOwner(uid) || isAdmin();
+
+        allow create: if isOwner(uid)
+          && request.resource.data.userId == uid
+          && request.resource.data.status == "PENDING_PAYMENT"
+          && request.resource.data.quantity > 0
+          && request.resource.data.quantity <= 500
+          && request.resource.data.goldGrams > 0
+          && request.resource.data.spotPricePerGram > 0
+          && request.resource.data.metalValue >= 0
+          && request.resource.data.fee >= 0
+          && request.resource.data.totalValue >= 0;
+
+        /*
+         * Normal users cannot update orders.
+         *
+         * Admin/backend may update them.
+         */
+        allow update: if isAdmin();
+
+        allow delete: if isAdmin();
+      }
+
+
+      /*
+       * ==========================================================
+       * TRANSACTION LEDGER
+       * ==========================================================
+       *
+       * /users/{uid}/transactions/{transactionId}
+       *
+       * Users can READ their ledger.
+       *
+       * Users cannot create fake completed transactions.
+       *
+       * Backend/admin creates authoritative transactions.
+       */
+
+      match /transactions/{transactionId} {
+
+        allow read: if isOwner(uid) || isAdmin();
+
+        allow create: if isAdmin();
+
+        allow update: if isAdmin();
+
+        allow delete: if isAdmin();
+      }
+
+
+      /*
+       * ==========================================================
+       * VAULT BARS
+       * ==========================================================
+       *
+       * /users/{uid}/vaultBars/{barId}
+       *
+       * Users can see bars allocated to their account.
+       *
+       * They cannot create/change/delete bars themselves.
+       */
+
+      match /vaultBars/{barId} {
+
+        allow read: if isOwner(uid) || isAdmin();
+
+        allow create: if isAdmin();
+
+        allow update: if isAdmin();
+
+        allow delete: if isAdmin();
+      }
+
+
+      /*
+       * ==========================================================
+       * REDEMPTION REQUESTS
+       * ==========================================================
+       *
+       * /users/{uid}/redemptions/{redemptionId}
+       */
+
+      match /redemptions/{redemptionId} {
+
+        allow read: if isOwner(uid) || isAdmin();
+
+        /*
+         * User may CREATE a redemption request.
+         *
+         * The request is always initially PENDING.
+         */
+        allow create: if isOwner(uid)
+          && request.resource.data.userId == uid
+          && request.resource.data.status == "PENDING";
+
+        /*
+         * Only backend/admin can approve, reject,
+         * ship or complete a redemption.
+         */
+        allow update: if isAdmin();
+
+        allow delete: if isAdmin();
+      }
+
+
+      /*
+       * ==========================================================
+       * TRANSFERS
+       * ==========================================================
+       *
+       * Transfer records are immutable to normal users.
+       * Actual balance movement should eventually happen
+       * atomically on the trusted backend.
+       */
+
+      match /transfers/{transferId} {
+
+        allow read: if isOwner(uid) || isAdmin();
+
+        allow create: if isOwner(uid)
+          && request.resource.data.fromUserId == uid
+          && request.resource.data.status == "PENDING";
+
+        allow update: if isAdmin();
+
+        allow delete: if isAdmin();
+      }
+    }
+
+
+    /*
+     * ============================================================
+     * MARKET SPOT PRICE
+     * ============================================================
+     *
+     * /market/spot
+     *
+     * Everyone authenticated may READ the spot price.
+     *
+     * Normal users CANNOT change the price.
+     *
+     * This prevents someone from changing $110/g to $1/g
+     * through the browser.
+     */
+
+    match /market/{documentId} {
+
+      allow read: if signedIn();
+
+      allow write: if isAdmin();
+    }
+
+
+    /*
+     * ============================================================
+     * PUBLIC / SYSTEM CONFIGURATION
+     * ============================================================
+     *
+     * Add public configuration documents here later if needed.
+     *
+     * Nothing is writable by normal users.
+     */
+
+    match /public/{documentId} {
+
+      allow read: if signedIn();
+
+      allow write: if isAdmin();
+    }
+
+
+    /*
+     * ============================================================
+     * SECURITY DEFAULT
+     * ============================================================
+     *
+     * Anything not explicitly allowed above is DENIED.
+     */
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
