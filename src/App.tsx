@@ -1,6 +1,13 @@
 ```tsx
 import React, { useEffect, useState } from "react";
-import { onAuthStateChanged, User } from "firebase/auth";
+import {
+  onAuthStateChanged,
+  signInWithEmailAndPassword,
+  createUserWithEmailAndPassword,
+  signOut,
+  User,
+} from "firebase/auth";
+
 import {
   collection,
   doc,
@@ -51,7 +58,7 @@ export default function App() {
   const [firebaseUser, setFirebaseUser] = useState<User | null>(null);
 
   const [authLoading, setAuthLoading] = useState(true);
-  const [profileLoading, setProfileLoading] = useState(true);
+  const [profileLoading, setProfileLoading] = useState(false);
 
   const [currentUser, setCurrentUser] =
     useState<UserProfile>(DEFAULT_USER);
@@ -68,13 +75,14 @@ export default function App() {
   const [spotData, setSpotData] =
     useState<GoldSpotData>(DEFAULT_SPOT);
 
-  const [activeTab, setActiveTab] = useState<
-    "dashboard" |
-    "purchase" |
-    "blockchain" |
-    "architecture" |
-    "vault"
-  >("dashboard");
+  const [activeTab, setActiveTab] =
+    useState<
+      "dashboard" |
+      "purchase" |
+      "blockchain" |
+      "architecture" |
+      "vault"
+    >("dashboard");
 
   const [showRedeemModal, setShowRedeemModal] =
     useState(false);
@@ -82,11 +90,25 @@ export default function App() {
   const [showTransferModal, setShowTransferModal] =
     useState(false);
 
-  /*
-   * ---------------------------------------------------------
-   * FIREBASE AUTHENTICATION
-   * ---------------------------------------------------------
-   */
+  /* =========================================================
+     LOGIN STATE
+  ========================================================= */
+
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  const [isRegistering, setIsRegistering] =
+    useState(false);
+
+  const [loginLoading, setLoginLoading] =
+    useState(false);
+
+  const [loginError, setLoginError] =
+    useState("");
+
+  /* =========================================================
+     FIREBASE AUTH
+  ========================================================= */
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(
@@ -98,6 +120,8 @@ export default function App() {
         if (!user) {
           setCurrentUser(DEFAULT_USER);
           setProfileLoading(false);
+        } else {
+          setProfileLoading(true);
         }
       },
       (error) => {
@@ -112,11 +136,111 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  /*
-   * ---------------------------------------------------------
-   * USER PROFILE
-   * ---------------------------------------------------------
-   */
+  /* =========================================================
+     LOGIN / REGISTER
+  ========================================================= */
+
+  const handleAuthentication = async (
+    event: React.FormEvent
+  ) => {
+    event.preventDefault();
+
+    setLoginError("");
+
+    const cleanEmail = email.trim();
+
+    if (!cleanEmail || !password) {
+      setLoginError(
+        "Please enter your email and password."
+      );
+      return;
+    }
+
+    if (password.length < 6) {
+      setLoginError(
+        "Password must contain at least 6 characters."
+      );
+      return;
+    }
+
+    try {
+      setLoginLoading(true);
+
+      if (isRegistering) {
+        await createUserWithEmailAndPassword(
+          auth,
+          cleanEmail,
+          password
+        );
+      } else {
+        await signInWithEmailAndPassword(
+          auth,
+          cleanEmail,
+          password
+        );
+      }
+    } catch (error: any) {
+      console.error("Authentication failed:", error);
+
+      let message =
+        "Unable to sign in. Please try again.";
+
+      switch (error?.code) {
+        case "auth/invalid-credential":
+          message =
+            "Invalid email or password.";
+          break;
+
+        case "auth/user-not-found":
+          message =
+            "No account exists with this email.";
+          break;
+
+        case "auth/wrong-password":
+          message =
+            "Incorrect password.";
+          break;
+
+        case "auth/email-already-in-use":
+          message =
+            "An account already exists with this email.";
+          break;
+
+        case "auth/invalid-email":
+          message =
+            "Please enter a valid email address.";
+          break;
+
+        case "auth/weak-password":
+          message =
+            "Password must contain at least 6 characters.";
+          break;
+
+        case "auth/too-many-requests":
+          message =
+            "Too many attempts. Please wait and try again.";
+          break;
+
+        case "auth/network-request-failed":
+          message =
+            "Network error. Please check your internet connection.";
+          break;
+
+        default:
+          message =
+            error?.message ||
+            "Authentication failed.";
+      }
+
+      setLoginError(message);
+    } finally {
+      setLoginLoading(false);
+    }
+  };
+
+  /* =========================================================
+     USER PROFILE
+  ========================================================= */
 
   useEffect(() => {
     if (!firebaseUser) return;
@@ -140,7 +264,8 @@ export default function App() {
                 firebaseUser.email?.split("@")[0] ||
                 "GOLD10 User",
 
-              email: firebaseUser.email || "",
+              email:
+                firebaseUser.email || "",
 
               walletAddress: "",
 
@@ -159,8 +284,12 @@ export default function App() {
 
             await setDoc(userRef, {
               ...profile,
-              createdAt: serverTimestamp(),
-              updatedAt: serverTimestamp(),
+
+              createdAt:
+                serverTimestamp(),
+
+              updatedAt:
+                serverTimestamp(),
             });
 
             setCurrentUser(profile);
@@ -175,6 +304,7 @@ export default function App() {
               name:
                 data.name ||
                 firebaseUser.displayName ||
+                firebaseUser.email?.split("@")[0] ||
                 "GOLD10 User",
 
               email:
@@ -183,8 +313,7 @@ export default function App() {
                 "",
 
               walletAddress:
-                data.walletAddress ||
-                "",
+                data.walletAddress || "",
 
               goldBalance:
                 typeof data.goldBalance === "number"
@@ -197,16 +326,17 @@ export default function App() {
                   : 0,
 
               status:
-                data.status ||
-                "active",
+                data.status || "active",
 
               createdAt:
-                data.createdAt?.toDate?.()
+                data.createdAt
+                  ?.toDate?.()
                   ?.toISOString?.() ||
                 data.createdAt,
 
               updatedAt:
-                data.updatedAt?.toDate?.()
+                data.updatedAt
+                  ?.toDate?.()
                   ?.toISOString?.() ||
                 data.updatedAt,
             };
@@ -237,11 +367,9 @@ export default function App() {
     return () => unsubscribe();
   }, [firebaseUser]);
 
-  /*
-   * ---------------------------------------------------------
-   * USER VAULT BARS
-   * ---------------------------------------------------------
-   */
+  /* =========================================================
+     USER VAULT BARS
+  ========================================================= */
 
   useEffect(() => {
     if (!firebaseUser) {
@@ -303,12 +431,14 @@ export default function App() {
                 ),
 
               createdAt:
-                data.createdAt?.toDate?.()
+                data.createdAt
+                  ?.toDate?.()
                   ?.toISOString?.() ||
                 data.createdAt,
 
               updatedAt:
-                data.updatedAt?.toDate?.()
+                data.updatedAt
+                  ?.toDate?.()
                   ?.toISOString?.() ||
                 data.updatedAt,
             };
@@ -329,11 +459,9 @@ export default function App() {
     return () => unsubscribe();
   }, [firebaseUser]);
 
-  /*
-   * ---------------------------------------------------------
-   * USER TRANSACTION LEDGER
-   * ---------------------------------------------------------
-   */
+  /* =========================================================
+     TRANSACTIONS
+  ========================================================= */
 
   useEffect(() => {
     if (!firebaseUser) {
@@ -370,7 +498,8 @@ export default function App() {
                 firebaseUser.uid,
 
               timestamp:
-                data.timestamp?.toDate?.()
+                data.timestamp
+                  ?.toDate?.()
                   ?.toISOString?.() ||
                 data.timestamp ||
                 new Date().toISOString(),
@@ -406,12 +535,14 @@ export default function App() {
                 data.toWallet,
 
               totalUsd:
-                typeof data.totalUsd === "number"
+                typeof data.totalUsd ===
+                "number"
                   ? data.totalUsd
                   : undefined,
 
               feeUsd:
-                typeof data.feeUsd === "number"
+                typeof data.feeUsd ===
+                "number"
                   ? data.feeUsd
                   : undefined,
 
@@ -422,12 +553,14 @@ export default function App() {
                 data.blockchainTx,
 
               createdAt:
-                data.createdAt?.toDate?.()
+                data.createdAt
+                  ?.toDate?.()
                   ?.toISOString?.() ||
                 data.createdAt,
 
               updatedAt:
-                data.updatedAt?.toDate?.()
+                data.updatedAt
+                  ?.toDate?.()
                   ?.toISOString?.() ||
                 data.updatedAt,
             };
@@ -448,11 +581,9 @@ export default function App() {
     return () => unsubscribe();
   }, [firebaseUser]);
 
-  /*
-   * ---------------------------------------------------------
-   * MARKET SPOT PRICE
-   * ---------------------------------------------------------
-   */
+  /* =========================================================
+     MARKET SPOT
+  ========================================================= */
 
   useEffect(() => {
     const spotRef = doc(
@@ -478,11 +609,11 @@ export default function App() {
             ),
 
           currency:
-            data.currency ||
-            "USD",
+            data.currency || "USD",
 
           updatedAt:
-            data.updatedAt?.toDate?.()
+            data.updatedAt
+              ?.toDate?.()
               ?.toISOString?.() ||
             data.updatedAt ||
             new Date().toISOString(),
@@ -505,11 +636,9 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  /*
-   * ---------------------------------------------------------
-   * USER DIRECTORY
-   * ---------------------------------------------------------
-   */
+  /* =========================================================
+     USER DIRECTORY
+  ========================================================= */
 
   useEffect(() => {
     if (!firebaseUser) {
@@ -519,9 +648,10 @@ export default function App() {
 
     const loadUsers = async () => {
       try {
-        const snapshot = await getDocs(
-          collection(db, "users")
-        );
+        const snapshot =
+          await getDocs(
+            collection(db, "users")
+          );
 
         const users: UserProfile[] =
           snapshot.docs
@@ -560,19 +690,22 @@ export default function App() {
                   "active",
 
                 createdAt:
-                  data.createdAt?.toDate?.()
+                  data.createdAt
+                    ?.toDate?.()
                     ?.toISOString?.() ||
                   data.createdAt,
 
                 updatedAt:
-                  data.updatedAt?.toDate?.()
+                  data.updatedAt
+                    ?.toDate?.()
                     ?.toISOString?.() ||
                   data.updatedAt,
               };
             })
             .filter(
               (user) =>
-                user.status !== "suspended"
+                user.status !==
+                "suspended"
             );
 
         setAllUsers(users);
@@ -589,11 +722,9 @@ export default function App() {
     loadUsers();
   }, [firebaseUser]);
 
-  /*
-   * ---------------------------------------------------------
-   * CALLBACKS
-   * ---------------------------------------------------------
-   */
+  /* =========================================================
+     CALLBACKS
+  ========================================================= */
 
   const handlePurchaseSuccess = (
     purchase: any
@@ -628,16 +759,11 @@ export default function App() {
     setShowRedeemModal(false);
   };
 
-  /*
-   * ---------------------------------------------------------
-   * LOADING STATE
-   * ---------------------------------------------------------
-   */
+  /* =========================================================
+     LOADING
+  ========================================================= */
 
-  if (
-    authLoading ||
-    profileLoading
-  ) {
+  if (authLoading) {
     return (
       <div className="min-h-screen bg-[#050505] text-[#d4af37] flex items-center justify-center">
         <div className="text-center">
@@ -653,48 +779,142 @@ export default function App() {
     );
   }
 
-  /*
-   * ---------------------------------------------------------
-   * LOGIN GUARD
-   * ---------------------------------------------------------
-   */
+  /* =========================================================
+     LOGIN SCREEN
+  ========================================================= */
 
   if (!firebaseUser) {
     return (
       <div className="min-h-screen bg-[#050505] text-[#d4af37] flex items-center justify-center px-6">
-        <div className="max-w-md w-full border border-[#d4af3744] bg-[#0a0a0a] p-8 text-center">
 
-          <h1 className="font-serif text-3xl text-white tracking-widest">
-            GOLD10
-          </h1>
+        <div className="max-w-md w-full border border-[#d4af3744] bg-[#0a0a0a] p-8">
 
-          <p className="mt-4 text-sm text-[#d4af37aa]">
-            24K gold asset platform
-          </p>
+          <div className="text-center">
 
-          <p className="mt-6 text-xs text-white/50">
-            Please sign in to access your GOLD10 account.
-          </p>
+            <h1 className="font-serif text-3xl text-white tracking-widest">
+              GOLD10
+            </h1>
 
-          <button
-            onClick={() => {
-              window.location.href = "/login";
-            }}
-            className="mt-6 w-full border border-[#d4af37] px-5 py-3 text-xs uppercase tracking-widest text-[#d4af37] hover:bg-[#d4af37] hover:text-black transition"
+            <p className="mt-3 text-sm text-[#d4af37aa]">
+              24K gold asset platform
+            </p>
+
+          </div>
+
+          <form
+            onSubmit={handleAuthentication}
+            className="mt-8"
           >
-            Sign In
-          </button>
+
+            <label className="block text-xs uppercase tracking-widest text-white/60">
+              Email
+            </label>
+
+            <input
+              type="email"
+              value={email}
+              onChange={(event) =>
+                setEmail(event.target.value)
+              }
+              placeholder="you@example.com"
+              autoComplete="email"
+              className="mt-2 w-full bg-black border border-[#d4af3744] px-4 py-3 text-sm text-white outline-none focus:border-[#d4af37]"
+            />
+
+            <label className="block mt-5 text-xs uppercase tracking-widest text-white/60">
+              Password
+            </label>
+
+            <input
+              type="password"
+              value={password}
+              onChange={(event) =>
+                setPassword(event.target.value)
+              }
+              placeholder="••••••••"
+              autoComplete={
+                isRegistering
+                  ? "new-password"
+                  : "current-password"
+              }
+              className="mt-2 w-full bg-black border border-[#d4af3744] px-4 py-3 text-sm text-white outline-none focus:border-[#d4af37]"
+            />
+
+            {loginError && (
+              <div className="mt-4 border border-red-500/40 bg-red-500/10 px-4 py-3 text-xs text-red-300">
+                {loginError}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={loginLoading}
+              className="mt-6 w-full border border-[#d4af37] px-5 py-3 text-xs uppercase tracking-widest text-[#d4af37] hover:bg-[#d4af37] hover:text-black transition disabled:opacity-50"
+            >
+              {loginLoading
+                ? "Please wait..."
+                : isRegistering
+                ? "Create Account"
+                : "Sign In"}
+            </button>
+
+          </form>
+
+          <div className="mt-6 text-center">
+
+            <button
+              type="button"
+              onClick={() => {
+                setIsRegistering(
+                  !isRegistering
+                );
+
+                setLoginError("");
+              }}
+              className="text-xs text-white/50 hover:text-[#d4af37] transition"
+            >
+              {isRegistering
+                ? "Already have an account? Sign in"
+                : "New to GOLD10? Create an account"}
+            </button>
+
+          </div>
+
+          <div className="mt-8 pt-5 border-t border-[#d4af3722] text-center text-[9px] uppercase tracking-[0.2em] text-white/30">
+            Firebase Authentication
+          </div>
+
+        </div>
+
+      </div>
+    );
+  }
+
+  /* =========================================================
+     PROFILE LOADING
+  ========================================================= */
+
+  if (profileLoading) {
+    return (
+      <div className="min-h-screen bg-[#050505] text-[#d4af37] flex items-center justify-center">
+        <div className="text-center">
+
+          <div className="font-serif text-3xl text-white tracking-widest">
+            GOLD10
+          </div>
+
+          <div className="mt-4 text-xs uppercase tracking-[0.25em] text-[#d4af3788]">
+            Loading account...
+          </div>
 
         </div>
       </div>
     );
   }
 
-  /*
-   * ---------------------------------------------------------
-   * MAIN APPLICATION
-   * ---------------------------------------------------------
-   */
+  /* =========================================================
+     MAIN APPLICATION
+  ========================================================= */
 
   return (
     <div className="min-h-screen bg-[#050505] text-[#d4af37] flex flex-col">
@@ -799,6 +1019,22 @@ export default function App() {
             <span>
               Real-time Ledger
             </span>
+
+            <button
+              onClick={async () => {
+                try {
+                  await signOut(auth);
+                } catch (error) {
+                  console.error(
+                    "Sign out failed:",
+                    error
+                  );
+                }
+              }}
+              className="hover:text-[#d4af37] transition"
+            >
+              Sign Out
+            </button>
 
           </div>
 
