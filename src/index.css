@@ -1,0 +1,41 @@
+@import "tailwindcss";
+
+@layer base {
+  :root {
+    --gold: #d4af37;
+    --gold-light: #f3e5ab;
+    --gold-dark: #997f22;
+    --bg-dark: #050505;
+    --card-dark: #0a0a0a;
+  }
+
+  body {
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    background-color: #050505;
+    color: #d4af37;
+  }
+
+  .font-serif {
+    font-family: 'Cinzel', serif, Georgia;
+  }
+
+  .font-mono {
+    font-family: 'JetBrains Mono', monospace;
+  }
+}
+
+/* Custom scrollbar for luxury aesthetic */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #050505;
+}
+::-webkit-scrollbar-thumb {
+  background: #d4af3733;
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #d4af3788;
+}

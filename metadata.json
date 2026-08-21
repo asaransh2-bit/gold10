@@ -1,0 +1,6 @@
+{
+  "name": "GOLD10 - Gold-Backed Digital Asset System",
+  "description": "Enterprise-grade 10g 24K physical gold-backed digital asset platform with real-time Firestore ledger, Cloud Functions minting engine, EVM blockchain bridge, and zero-trust security rules.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
