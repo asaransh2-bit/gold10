@@ -1,12 +1,6 @@
 ```tsx
 import React, { useEffect, useState } from "react";
-import {
-  GoogleAuthProvider,
-  onAuthStateChanged,
-  signInWithPopup,
-  User,
-} from "firebase/auth";
-
+import { onAuthStateChanged, User } from "firebase/auth";
 import {
   collection,
   doc,
@@ -58,8 +52,6 @@ export default function App() {
 
   const [authLoading, setAuthLoading] = useState(true);
   const [profileLoading, setProfileLoading] = useState(true);
-  const [signingIn, setSigningIn] = useState(false);
-  const [authError, setAuthError] = useState("");
 
   const [currentUser, setCurrentUser] =
     useState<UserProfile>(DEFAULT_USER);
@@ -76,63 +68,19 @@ export default function App() {
   const [spotData, setSpotData] =
     useState<GoldSpotData>(DEFAULT_SPOT);
 
-  const [activeTab, setActiveTab] =
-    useState<
-      "dashboard" |
-      "purchase" |
-      "blockchain" |
-      "architecture" |
-      "vault"
-    >("dashboard");
+  const [activeTab, setActiveTab] = useState<
+    "dashboard" |
+    "purchase" |
+    "blockchain" |
+    "architecture" |
+    "vault"
+  >("dashboard");
 
   const [showRedeemModal, setShowRedeemModal] =
     useState(false);
 
   const [showTransferModal, setShowTransferModal] =
     useState(false);
-
-  /*
-   * ---------------------------------------------------------
-   * GOOGLE SIGN IN
-   * ---------------------------------------------------------
-   */
-
-  const handleSignIn = async () => {
-    if (signingIn) return;
-
-    setSigningIn(true);
-    setAuthError("");
-
-    try {
-      const provider = new GoogleAuthProvider();
-
-      provider.setCustomParameters({
-        prompt: "select_account",
-      });
-
-      await signInWithPopup(auth, provider);
-    } catch (error: any) {
-      console.error("Google sign-in failed:", error);
-
-      if (error?.code === "auth/popup-closed-by-user") {
-        setAuthError("Sign-in window was closed.");
-      } else if (error?.code === "auth/popup-blocked") {
-        setAuthError(
-          "Your browser blocked the Google sign-in popup. Please allow popups for this site."
-        );
-      } else if (error?.code === "auth/unauthorized-domain") {
-        setAuthError(
-          "This website is not authorized in Firebase Authentication."
-        );
-      } else {
-        setAuthError(
-          error?.message || "Unable to sign in. Please try again."
-        );
-      }
-    } finally {
-      setSigningIn(false);
-    }
-  };
 
   /*
    * ---------------------------------------------------------
@@ -158,7 +106,6 @@ export default function App() {
         setFirebaseUser(null);
         setAuthLoading(false);
         setProfileLoading(false);
-        setAuthError(error.message || "Authentication error.");
       }
     );
 
@@ -172,14 +119,13 @@ export default function App() {
    */
 
   useEffect(() => {
-    if (!firebaseUser) {
-      setProfileLoading(false);
-      return;
-    }
+    if (!firebaseUser) return;
 
-    setProfileLoading(true);
-
-    const userRef = doc(db, "users", firebaseUser.uid);
+    const userRef = doc(
+      db,
+      "users",
+      firebaseUser.uid
+    );
 
     const unsubscribe = onSnapshot(
       userRef,
@@ -204,9 +150,11 @@ export default function App() {
 
               status: "active",
 
-              createdAt: new Date().toISOString(),
+              createdAt:
+                new Date().toISOString(),
 
-              updatedAt: new Date().toISOString(),
+              updatedAt:
+                new Date().toISOString(),
             };
 
             await setDoc(userRef, {
@@ -253,11 +201,13 @@ export default function App() {
                 "active",
 
               createdAt:
-                data.createdAt?.toDate?.()?.toISOString?.() ||
+                data.createdAt?.toDate?.()
+                  ?.toISOString?.() ||
                 data.createdAt,
 
               updatedAt:
-                data.updatedAt?.toDate?.()?.toISOString?.() ||
+                data.updatedAt?.toDate?.()
+                  ?.toISOString?.() ||
                 data.updatedAt,
             };
 
@@ -309,47 +259,60 @@ export default function App() {
     const unsubscribe = onSnapshot(
       barsRef,
       (snapshot) => {
-        const bars: VaultBar[] = snapshot.docs.map(
-          (item) => {
+        const bars: VaultBar[] =
+          snapshot.docs.map((item) => {
             const data = item.data();
 
             return {
-              id: data.id || item.id,
+              id:
+                data.id ||
+                item.id,
 
               serialNumber:
-                data.serialNumber || "",
+                data.serialNumber ||
+                "",
 
               vaultLocation:
-                data.vaultLocation || "",
+                data.vaultLocation ||
+                "",
 
               vaultProvider:
-                data.vaultProvider || "",
+                data.vaultProvider ||
+                "",
 
               auditCertificateId:
-                data.auditCertificateId || "",
+                data.auditCertificateId ||
+                "",
 
               weightGrams:
-                Number(data.weightGrams || 0),
+                Number(
+                  data.weightGrams || 0
+                ),
 
               purity:
-                data.purity || "999.9",
+                data.purity ||
+                "999.9",
 
               status:
-                data.status || "available",
+                data.status ||
+                "available",
 
               allocatedGold10:
-                Number(data.allocatedGold10 || 0),
+                Number(
+                  data.allocatedGold10 || 0
+                ),
 
               createdAt:
-                data.createdAt?.toDate?.()?.toISOString?.() ||
+                data.createdAt?.toDate?.()
+                  ?.toISOString?.() ||
                 data.createdAt,
 
               updatedAt:
-                data.updatedAt?.toDate?.()?.toISOString?.() ||
+                data.updatedAt?.toDate?.()
+                  ?.toISOString?.() ||
                 data.updatedAt,
             };
-          }
-        );
+          });
 
         setUserBars(bars);
       },
@@ -398,14 +361,17 @@ export default function App() {
             const data = item.data();
 
             return {
-              id: data.id || item.id,
+              id:
+                data.id ||
+                item.id,
 
               userId:
                 data.userId ||
                 firebaseUser.uid,
 
               timestamp:
-                data.timestamp?.toDate?.()?.toISOString?.() ||
+                data.timestamp?.toDate?.()
+                  ?.toISOString?.() ||
                 data.timestamp ||
                 new Date().toISOString(),
 
@@ -414,10 +380,14 @@ export default function App() {
                 "GOLD10_PURCHASE",
 
               tokenAmount:
-                Number(data.tokenAmount || 0),
+                Number(
+                  data.tokenAmount || 0
+                ),
 
               goldGrams:
-                Number(data.goldGrams || 0),
+                Number(
+                  data.goldGrams || 0
+                ),
 
               status:
                 data.status ||
@@ -452,11 +422,13 @@ export default function App() {
                 data.blockchainTx,
 
               createdAt:
-                data.createdAt?.toDate?.()?.toISOString?.() ||
+                data.createdAt?.toDate?.()
+                  ?.toISOString?.() ||
                 data.createdAt,
 
               updatedAt:
-                data.updatedAt?.toDate?.()?.toISOString?.() ||
+                data.updatedAt?.toDate?.()
+                  ?.toISOString?.() ||
                 data.updatedAt,
             };
           });
@@ -501,13 +473,17 @@ export default function App() {
 
         setSpotData({
           pricePerGram:
-            Number(data.pricePerGram || 110),
+            Number(
+              data.pricePerGram || 110
+            ),
 
           currency:
-            data.currency || "USD",
+            data.currency ||
+            "USD",
 
           updatedAt:
-            data.updatedAt?.toDate?.()?.toISOString?.() ||
+            data.updatedAt?.toDate?.()
+              ?.toISOString?.() ||
             data.updatedAt ||
             new Date().toISOString(),
 
@@ -570,21 +546,27 @@ export default function App() {
                   "",
 
                 goldBalance:
-                  Number(data.goldBalance || 0),
+                  Number(
+                    data.goldBalance || 0
+                  ),
 
                 usdBalance:
-                  Number(data.usdBalance || 0),
+                  Number(
+                    data.usdBalance || 0
+                  ),
 
                 status:
                   data.status ||
                   "active",
 
                 createdAt:
-                  data.createdAt?.toDate?.()?.toISOString?.() ||
+                  data.createdAt?.toDate?.()
+                    ?.toISOString?.() ||
                   data.createdAt,
 
                 updatedAt:
-                  data.updatedAt?.toDate?.()?.toISOString?.() ||
+                  data.updatedAt?.toDate?.()
+                    ?.toISOString?.() ||
                   data.updatedAt,
               };
             })
@@ -652,11 +634,13 @@ export default function App() {
    * ---------------------------------------------------------
    */
 
-  if (authLoading || profileLoading) {
+  if (
+    authLoading ||
+    profileLoading
+  ) {
     return (
       <div className="min-h-screen bg-[#050505] text-[#d4af37] flex items-center justify-center">
         <div className="text-center">
-
           <div className="font-serif text-3xl text-white tracking-widest">
             GOLD10
           </div>
@@ -664,7 +648,6 @@ export default function App() {
           <div className="mt-4 text-xs uppercase tracking-[0.25em] text-[#d4af3788]">
             Connecting securely...
           </div>
-
         </div>
       </div>
     );
@@ -679,7 +662,6 @@ export default function App() {
   if (!firebaseUser) {
     return (
       <div className="min-h-screen bg-[#050505] text-[#d4af37] flex items-center justify-center px-6">
-
         <div className="max-w-md w-full border border-[#d4af3744] bg-[#0a0a0a] p-8 text-center">
 
           <h1 className="font-serif text-3xl text-white tracking-widest">
@@ -694,20 +676,13 @@ export default function App() {
             Please sign in to access your GOLD10 account.
           </p>
 
-          {authError && (
-            <div className="mt-5 border border-red-500/40 bg-red-500/10 px-4 py-3 text-xs text-red-300">
-              {authError}
-            </div>
-          )}
-
           <button
-            onClick={handleSignIn}
-            disabled={signingIn}
-            className="mt-6 w-full border border-[#d4af37] px-5 py-3 text-xs uppercase tracking-widest text-[#d4af37] hover:bg-[#d4af37] hover:text-black transition disabled:opacity-50"
+            onClick={() => {
+              window.location.href = "/login";
+            }}
+            className="mt-6 w-full border border-[#d4af37] px-5 py-3 text-xs uppercase tracking-widest text-[#d4af37] hover:bg-[#d4af37] hover:text-black transition"
           >
-            {signingIn
-              ? "Signing In..."
-              : "Sign In with Google"}
+            Sign In
           </button>
 
         </div>
